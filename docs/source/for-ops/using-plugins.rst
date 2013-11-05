@@ -251,8 +251,16 @@ CommandReloader
     works by checking the modification time and the path of the file pointed by
     the **cmd** option every **loop_rate** seconds. This may be useful while
     developing worker processes or even for hot code upgrade in production.
+    You can also configure it so it checks the working_dir instead (with all its
+    subdirectories).
 
     **use**
       set to ``circus.plugins.command_reloader.CommandReloader``
     **loop_rate**
       the frequency the plugin should check for modification in seconds. Default: 1.
+    **use_working_dir**
+      Boolean indicating that it should check the working_dir of the worker
+      instead of its cmd. Default: 'False'.
+    **workers**
+      A comma separated watcher names list indicating which workers should be
+      checked. '*' or 'None' means that all workers will be checked.
