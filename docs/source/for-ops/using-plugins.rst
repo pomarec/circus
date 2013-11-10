@@ -93,7 +93,7 @@ HttpObserver
 ResourceWatcher
 ===============
 
-    This services watches the resources of the given process and triggers a restart when they exceed certain limitations too often in a row.
+    This services watches the resources of the given process and triggers a restart or reload when they exceed certain limitations too often in a row.
 
     It has the same configuration as statsd and adds the following:
 
@@ -129,6 +129,14 @@ ResourceWatcher
 
     **max_count**
         How often these limits (each one is counted separately) are allowed to be exceeded before a restart will be triggered. Default: 3
+
+    **use_reload**
+        Trigger a reload command instead of restart. Default: False
+
+    **per_process**
+        Resource usage will be monitored on a per process basis. Default: True.
+        Example : if per_process is True and max_cpu is set, the restart (or reload) command will be triggered when a process exceeds this limit (taken into account loop_rate and max_count).
+        If per_process is false, it will be triggered if the sum of cpu consumed by watcher's process exceeds max_cpu.
 
 
 

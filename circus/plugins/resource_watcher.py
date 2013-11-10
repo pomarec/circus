@@ -1,6 +1,8 @@
 import warnings
 from circus.plugins.statsd import BaseObserver
 from circus.util import human2bytes
+from collections import defaultdict
+import six
 
 
 class ResourceWatcher(BaseObserver):
@@ -37,90 +39,105 @@ class ResourceWatcher(BaseObserver):
             except ValueError:
                 self.max_mem = human2bytes(self.min_mem)    # int -> absolute
         self.health_threshold = float(config.get("health_threshold",
-                                      75))  # in %
+                                      75))                  # in %
         self.max_count = int(config.get("max_count", 3))
-        self._count_over_cpu = self._count_over_mem = 0
-        self._count_under_cpu = self._count_under_mem = 0
-        self._count_health = 0
+        self.use_reload = bool(config.get("use_reload"))
+        self.per_process = bool(config.get("per_process", True))
+        self._counters = defaultdict(lambda: defaultdict(int))
 
     def look_after(self):
-        info = self.call("stats", name=self.watcher)
-        if info["status"] == "error":
-            self.statsd.increment("_resource_watcher.%s.error" % self.watcher)
+        stats = self.collect_stats()
+        if stats is None:
             return
 
-        stats = info['info']
-        cpus = []
-        mems = []
-        mems_abs = []
-
-        for sub_info in stats.values():
-            if isinstance(sub_info, dict):
-                cpus.append(100 if sub_info['cpu'] == 'N/A' else
-                            float(sub_info['cpu']))
-                mems.append(100 if sub_info['mem'] == 'N/A' else
-                            float(sub_info['mem']))
-                mems_abs.append(0 if sub_info['mem_info1'] == 'N/A' else
-                                human2bytes(sub_info['mem_info1']))
-
-        if cpus:
-            max_cpu = max(cpus)
-            max_mem = max(mems)
-            max_mem_abs = max(mems_abs)
-            min_cpu = min(cpus)
-            min_mem = min(mems)
-            min_mem_abs = min(mems_abs)
+        if self.per_process:
+            for item in filter(lambda x: x != self.watcher, stats):
+                self.update_counters(stats, item)
+                self.process_counters(item)
         else:
-            # we dont' have any process running. max = 0 then
-            max_cpu = max_mem = min_cpu = min_mem = \
-                max_mem_abs = min_mem_abs = 0
+            self.update_counters(stats, self.watcher)
+            self.process_counters(self.watcher)
 
-        if self.max_cpu and max_cpu > self.max_cpu:
-            self.statsd.increment("_resource_watcher.%s.over_cpu" %
-                                  self.watcher)
-            self._count_over_cpu += 1
-        else:
-            self._count_over_cpu = 0
+    def collect_stats(self):
+        stats = self.call("stats", name=self.watcher)
+        if stats["status"] == "error":
+            self.statsd.increment("_resource_watcher.%s.error" % self.watcher)
+            return
+        stats = dict((k, v) for k, v in six.iteritems(stats['info']) if
+                     type(v) == dict)
 
-        if self.min_cpu is not None and min_cpu <= self.min_cpu:
-            self.statsd.increment("_resource_watcher.%s.under_cpu" %
-                                  self.watcher)
-            self._count_under_cpu += 1
-        else:
-            self._count_under_cpu = 0
-
-        if (type(self.max_mem) == float and max_mem > self.max_mem or
-                type(self.max_mem) == int and max_mem_abs > self.max_mem):
-            self.statsd.increment("_resource_watcher.%s.over_memory" %
-                                  self.watcher)
-            self._count_over_mem += 1
-        else:
-            self._count_over_mem = 0
-
-        if self.min_mem is not None:
-            if (type(self.min_mem) == float and min_mem < self.min_mem or
-                    type(self.min_mem) == int and min_mem_abs < self.min_mem):
-                self.statsd.increment("_resource_watcher.%s.under_memory" %
-                                      self.watcher)
-                self._count_under_mem += 1
+        # Convert absolute memory to bytes
+        for item in stats:
+            if stats[item]['mem_info1'] == 'N/A':
+                stats[item]['mem_abs'] = 'N/A'
             else:
-                self._count_under_mem = 0
-        else:
-            self._count_under_mem = 0
+                stats[item]['mem_abs'] = human2bytes(stats[item]['mem_info1'])
 
-        if (self.health_threshold and
-                (max_cpu + max_mem) / 2.0 > self.health_threshold):
-            self.statsd.increment("_resource_watcher.%s.over_health" %
-                                  self.watcher)
-            self._count_health += 1
-        else:
-            self._count_health = 0
+        # Compute watcher stats if not in per_process mode
+        if not self.per_process:
+            stats[self.watcher] = defaultdict(lambda: 'N/A')
+            for item in filter(lambda x: x != self.watcher, stats):
+                for k in ['cpu', 'mem', 'mem_abs']:
+                    if stats[item][k] != 'N/A':
+                        if stats[self.watcher][k] == 'N/A':
+                            stats[self.watcher][k] = stats[item][k]
+                        else:
+                            stats[self.watcher][k] += stats[item][k]
+        return stats
 
-        if max([self._count_over_cpu, self._count_under_cpu,
-                self._count_over_mem, self._count_under_mem,
-                self._count_health]) > self.max_count:
-            self.statsd.increment("_resource_watcher.%s.restarting" %
-                                  self.watcher)
-            # todo: restart only process instead of the whole watcher
-            self.cast("restart", name=self.watcher)
-            self._count_mem = self._count_health = self._count_mem = 0
+    def update_counters(self, stats, item):
+        self.update_counters_of_metric(stats, item, 'max_cpu')
+        self.update_counters_of_metric(stats, item, 'min_cpu')
+        if type(self.max_mem) == int:                       # see max_mem doc
+            self.update_counters_of_metric(stats, item, 'max_mem_abs')
+        else:
+            self.update_counters_of_metric(stats, item, 'max_mem')
+        if type(self.min_mem) == int:                       # see min_mem doc
+            self.update_counters_of_metric(stats, item, 'min_mem_abs')
+        else:
+            self.update_counters_of_metric(stats, item, 'min_mem')
+        self.update_counters_of_health(stats, item)
+
+    def update_counters_of_metric(self, stats, item, metric):
+        current_value = stats[item][metric[4:]]
+        threshold = getattr(self, metric.strip('_abs'))     # see max_mem doc
+        if current_value == 'N/A' or threshold is None:
+            return
+        limit_type = metric[:3]
+        if (limit_type == 'max' and current_value > threshold or
+                limit_type == 'min' and current_value < threshold):
+            self.statsd.increment("_resource_watcher.%s.%s_%s" %
+                                  (self.watcher,
+                                   "under" if limit_type == 'min' else "over",
+                                   metric.split('_')[1]))
+            self._counters[item][metric] += 1
+        else:
+            self._counters[item][metric] = 0
+
+    def update_counters_of_health(self, stats, item):
+        if self.health_threshold:
+            health = 0
+            if stats[item]['cpu'] != 'N/A':
+                health += stats[item]['cpu']
+            if stats[item]['mem'] != 'N/A':
+                health += stats[item]['mem']
+            if health/2.0 > self.health_threshold:
+                self.statsd.increment("_resource_watcher.%s.over_health" %
+                                      self.watcher)
+                self._counters[item]['health'] += 1
+            else:
+                self._counters[item]['health'] = 0
+
+    def process_counters(self, item):
+        # TODO: reload exceeding process but not the entire watcher when
+        #       reload command will allow it.
+        if max(self._counters[item].values()) > self.max_count:
+            if self.use_reload:
+                self.statsd.increment("_resource_watcher.%s.reloading" %
+                                      self.watcher)
+                self.cast("reload", name=self.watcher)
+            else:
+                self.statsd.increment("_resource_watcher.%s.restarting" %
+                                      self.watcher)
+                self.cast("restart", name=self.watcher)
+            self._counters = defaultdict(lambda: defaultdict(int))
