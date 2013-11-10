@@ -3,10 +3,15 @@ from circus.plugins.statsd import BaseObserver
 from circus.util import human2bytes
 from collections import defaultdict
 import six
+import signal
+
+VALID_ACTIONS = ['restart', 'reload']
+VALID_ACTIONS += filter(lambda s: s.startswith('SIG'), dir(signal))
+VALID_ACTIONS = map(lambda s: s.lower(), VALID_ACTIONS)
 
 
 class ResourceWatcher(BaseObserver):
-
+    
     def __init__(self, *args, **config):
         super(ResourceWatcher, self).__init__(*args, **config)
         self.watcher = config.get("watcher", None)
@@ -41,7 +46,9 @@ class ResourceWatcher(BaseObserver):
         self.health_threshold = float(config.get("health_threshold",
                                       75))                  # in %
         self.max_count = int(config.get("max_count", 3))
-        self.use_reload = bool(config.get("use_reload"))
+        self.action = config.get("action", 'restart').lower()
+        if self.action not in VALID_ACTIONS:
+            raise ValueError(self.action)
         self.per_process = bool(config.get("per_process", True))
         self._counters = defaultdict(lambda: defaultdict(int))
 
@@ -129,15 +136,29 @@ class ResourceWatcher(BaseObserver):
                 self._counters[item]['health'] = 0
 
     def process_counters(self, item):
-        # TODO: reload exceeding process but not the entire watcher when
-        #       reload command will allow it.
         if max(self._counters[item].values()) > self.max_count:
-            if self.use_reload:
+            if self.action == 'reload':
                 self.statsd.increment("_resource_watcher.%s.reloading" %
                                       self.watcher)
                 self.cast("reload", name=self.watcher)
-            else:
+                self._counters = defaultdict(lambda: defaultdict(int))
+            elif self.action == 'restart':
                 self.statsd.increment("_resource_watcher.%s.restarting" %
                                       self.watcher)
                 self.cast("restart", name=self.watcher)
-            self._counters = defaultdict(lambda: defaultdict(int))
+                self._counters = defaultdict(lambda: defaultdict(int))
+            elif item.isdigit():
+                print "sending signal to proc ", item, self.action
+                self.statsd.increment("_resource_watcher.%s.%s.signal.%s" %
+                                      (self.watcher,
+                                       item,
+                                       self.action))
+                self.cast("signal", name=self.watcher, pid=item,
+                          signum=self.action)
+                self._counters[item] = defaultdict(int)
+            else:
+                print "sending signal to watcher ", self.action
+                self.statsd.increment("_resource_watcher.%s.signal.%s" %
+                                      (self.watcher, self.action))
+                self.cast("signal", name=self.watcher, signum=1)
+                self._counters = defaultdict(lambda: defaultdict(int))
