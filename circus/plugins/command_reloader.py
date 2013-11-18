@@ -29,7 +29,7 @@ class CommandReloader(CircusPlugin):
         # Get age of the watcher (max age of its processes)
         infos = self.call('stats')['infos'][watcher].values()
         age = max(map(lambda x: x['age'], infos))
-        if math.ceil(time.time() - age) < self.infos[watcher]['mtime']:
+        if math.ceil(time.time() - age + 2) < self.infos[watcher]['mtime']:
             return True
         
         return False
