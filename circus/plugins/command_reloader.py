@@ -29,7 +29,7 @@ class CommandReloader(CircusPlugin):
         # Get age of the watcher (max age of its processes)
         infos = self.call('stats')['infos'][watcher].values()
         age = max(map(lambda x: x['age'], infos))
-        if math.ceil(time.time() - age + 2) < self.infos[watcher]['mtime']:
+        if math.ceil(time.time() - age + 5) < self.infos[watcher]['mtime']:
             return True
         
         return False
@@ -44,6 +44,7 @@ class CommandReloader(CircusPlugin):
                 for filename in filenames:
                     mtime = os.stat(os.path.join(dirpath, filename)).st_mtime
                     max_mtime = max(max_mtime, mtime)
+                    max_path = filename
             return max_mtime
         else:
             return os.stat(path).st_mtime
@@ -74,12 +75,12 @@ class CommandReloader(CircusPlugin):
                 if self.is_modified(w, previous_path):
                     if self.use_reload:
                         logger.info('%s modified. Reloading.',
-                                    self.infos[watcher]['path'])
-                        self.call('reload', name=watcher)
+                                    self.infos[w]['path'])
+                        self.call('reload', name=w)
                     else:
                         logger.info('%s modified. Reloading.',
-                                    self.infos[watcher]['path'])
-                        self.call('restart', name=watcher)
+                                    self.infos[w]['path'])
+                        self.call('restart', name=w)
                     self.infos[w]['last_restart'] = time.time()
 
 
