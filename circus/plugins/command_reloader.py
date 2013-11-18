@@ -1,10 +1,10 @@
 import os
 import time
+import math
 from circus.plugins import CircusPlugin
 from circus import logger
 from zmq.eventloop import ioloop
 from collections import defaultdict
-
 
 class CommandReloader(CircusPlugin):
 
@@ -14,7 +14,7 @@ class CommandReloader(CircusPlugin):
         super(CommandReloader, self).__init__(*args, **config)
         self.name = config.get('name')
         self.loop_rate = int(self.config.get('loop_rate', 1))
-        self.watchers = self.config.get('watchers')
+        self.watchers = self.config.get('watchers', '*')
         self.use_working_dir = bool(self.config.get('use_working_dir'))
         self.use_reload = bool(self.config.get('use_reload'))
         self.infos = defaultdict(dict)
@@ -29,7 +29,7 @@ class CommandReloader(CircusPlugin):
         # Get age of the watcher (max age of its processes)
         infos = self.call('stats')['infos'][watcher].values()
         age = max(map(lambda x: x['age'], infos))
-        if time.time() - age < self.infos[watcher]['mtime']:
+        if math.ceil(time.time() - age) < self.infos[watcher]['mtime']:
             return True
         
         return False
@@ -51,10 +51,8 @@ class CommandReloader(CircusPlugin):
     def look_after(self):
         # Get concerned watchers
         # Note: watchers and their configuration can change at any time
-        list_ = self.call('list')
-        watchers = [watcher for watcher in list_['watchers']
-                    if not watcher.startswith('plugin:')]
-        if self.watchers and self.watchers != '*':
+        watchers = self.call('list')['watchers']
+        if self.watchers != '*':
             watchers = [w for w in watchers if w in self.watchers.split(',')]
         for watcher in list(self.infos.keys()):
             if watcher not in watchers:
