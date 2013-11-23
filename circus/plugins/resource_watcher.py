@@ -4,6 +4,7 @@ from circus.util import human2bytes
 from collections import defaultdict
 import six
 import signal
+from circus import logger
 
 VALID_ACTIONS = ['restart', 'reload']
 VALID_ACTIONS += filter(lambda s: s.startswith('SIG'), dir(signal))
@@ -148,7 +149,7 @@ class ResourceWatcher(BaseObserver):
                 self.cast("restart", name=self.watcher)
                 self._counters = defaultdict(lambda: defaultdict(int))
             elif item.isdigit():
-                print "sending signal to proc ", item, self.action
+                logger.info("sending signal to proc ", item, self.action)
                 self.statsd.increment("_resource_watcher.%s.%s.signal.%s" %
                                       (self.watcher,
                                        item,
@@ -157,7 +158,7 @@ class ResourceWatcher(BaseObserver):
                           signum=self.action)
                 self._counters[item] = defaultdict(int)
             else:
-                print "sending signal to watcher ", self.action
+                logger.info("sending signal to watcher ", self.action)
                 self.statsd.increment("_resource_watcher.%s.signal.%s" %
                                       (self.watcher, self.action))
                 self.cast("signal", name=self.watcher, signum=1)
