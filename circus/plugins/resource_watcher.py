@@ -70,6 +70,7 @@ class ResourceWatcher(BaseObserver):
         stats = self.call("stats", name=self.watcher)
         if stats["status"] == "error":
             self.statsd.increment("_resource_watcher.%s.error" % self.watcher)
+            logger.error("Can't get stats of %s" % self.watcher)
             return
         stats = dict((k, v) for k, v in six.iteritems(stats['info']) if
                      type(v) == dict)
