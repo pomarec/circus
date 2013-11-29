@@ -54,7 +54,6 @@ def daemonize():
         os._exit(0)
 
     # subchild
-    os.umask(0)
     maxfd = get_maxfd()
     closerange(0, maxfd)
 
@@ -121,6 +120,10 @@ def main():
     # load the arbiter from config
     arbiter = Arbiter.load_from_config(args.config)
 
+    # go ahead and set umask early if it is in the config
+    if arbiter.umask is not None:
+        os.umask(arbiter.umask)
+
     pidfile = args.pidfile or arbiter.pidfile or None
     if pidfile:
         pidfile = Pidfile(pidfile)
@@ -140,7 +143,7 @@ def main():
     restart = True
     while restart:
         try:
-            arbiter = Arbiter.load_from_config(args.config)
+            arbiter = arbiter or Arbiter.load_from_config(args.config)
             future = arbiter.start()
             restart = False
             if check_future_exception_and_log(future) is None:
@@ -152,6 +155,7 @@ def main():
         except KeyboardInterrupt:
             pass
         finally:
+            arbiter = None
             if pidfile is not None:
                 pidfile.unlink()
     sys.exit(0)

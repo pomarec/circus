@@ -3,13 +3,14 @@ import signal
 from mock import patch
 
 from circus import logger
+from circus.arbiter import Arbiter
 from circus.config import get_config
 from circus.watcher import Watcher
 from circus.process import Process
 from circus.sockets import CircusSocket
 from circus.tests.support import TestCase, EasyTestSuite
 from circus.util import replace_gnu_args
-from circus.py3compat import PY3
+from circus.py3compat import PY2
 
 
 HERE = os.path.join(os.path.dirname(__file__))
@@ -37,7 +38,9 @@ _CONF = {
     'issue567': os.path.join(CONFIG_DIR, 'issue567.ini'),
     'issue594': os.path.join(CONFIG_DIR, 'issue594.ini'),
     'reuseport': os.path.join(CONFIG_DIR, 'reuseport.ini'),
-    'issue651': os.path.join(CONFIG_DIR, 'issue651.ini')
+    'issue651': os.path.join(CONFIG_DIR, 'issue651.ini'),
+    'issue665': os.path.join(CONFIG_DIR, 'issue665.ini'),
+    'issue680': os.path.join(CONFIG_DIR, 'issue680.ini'),
 }
 
 
@@ -89,6 +92,81 @@ class TestConfig(TestCase):
         watcher = conf['watchers'][0]
         self.assertEqual(watcher['uid'], 'me')
 
+    def test_issues665(self):
+        '''
+        https://github.com/mozilla-services/circus/pull/665
+
+        Ensure args formatting when shell = True.
+        '''
+        conf = get_config(_CONF['issue665'])
+
+        def load(watcher_conf):
+            watcher = Watcher.load_from_config(watcher_conf.copy())
+            process = Process(watcher._nextwid, watcher.cmd,
+                              args=watcher.args,
+                              working_dir=watcher.working_dir,
+                              shell=watcher.shell, uid=watcher.uid,
+                              gid=watcher.gid, env=watcher.env,
+                              rlimits=watcher.rlimits, spawn=False,
+                              executable=watcher.executable,
+                              use_fds=watcher.use_sockets,
+                              watcher=watcher)
+            return process.format_args()
+
+        import circus.process
+        is_win = circus.process.is_win
+
+        try:
+            # force nix
+            circus.process.is_win = lambda: False
+
+            # without shell_args
+            with patch.object(logger, 'warn') as mock_logger_warn:
+                formatted_args = load(conf['watchers'][0])
+                self.assertEqual(formatted_args, ['foo --fd'])
+                self.assertFalse(mock_logger_warn.called)
+
+            # with shell_args
+
+            with patch.object(logger, 'warn') as mock_logger_warn:
+                formatted_args = load(conf['watchers'][1])
+                self.assertEqual(formatted_args,
+                                 ['foo --fd', 'bar', 'baz', 'qux'])
+                self.assertFalse(mock_logger_warn.called)
+
+            # with shell_args but not shell
+
+            with patch.object(logger, 'warn') as mock_logger_warn:
+                formatted_args = load(conf['watchers'][2])
+                self.assertEqual(formatted_args, ['foo', '--fd'])
+                self.assertTrue(mock_logger_warn.called)
+
+            # force win
+            circus.process.is_win = lambda: True
+
+            # without shell_args
+
+            with patch.object(logger, 'warn') as mock_logger_warn:
+                formatted_args = load(conf['watchers'][0])
+                self.assertEqual(formatted_args, ['foo --fd'])
+                self.assertFalse(mock_logger_warn.called)
+
+            # with shell_args
+
+            with patch.object(logger, 'warn') as mock_logger_warn:
+                formatted_args = load(conf['watchers'][1])
+                self.assertEqual(formatted_args, ['foo --fd'])
+                self.assertTrue(mock_logger_warn.called)
+
+            # with shell_args but not shell
+
+            with patch.object(logger, 'warn') as mock_logger_warn:
+                formatted_args = load(conf['watchers'][2])
+                self.assertEqual(formatted_args, ['foo', '--fd'])
+                self.assertTrue(mock_logger_warn.called)
+        finally:
+            circus.process.is_win = is_win
+
     def test_include_wildcards(self):
         conf = get_config(_CONF['include'])
         watchers = conf['watchers']
@@ -112,6 +190,16 @@ class TestConfig(TestCase):
         conf = get_config(_CONF['issue210'])
         watcher = Watcher.load_from_config(conf['watchers'][0])
         watcher.stop()
+
+    def test_plugin_priority(self):
+        arbiter = Arbiter.load_from_config(_CONF['issue680'])
+        watchers = arbiter.iter_watchers()
+        self.assertEqual(watchers[0].priority, 30)
+        self.assertEqual(watchers[0].name, 'plugin:myplugin')
+        self.assertEqual(watchers[1].priority, 20)
+        self.assertEqual(watchers[1].cmd, 'sleep 20')
+        self.assertEqual(watchers[2].priority, 10)
+        self.assertEqual(watchers[2].cmd, 'sleep 10')
 
     def test_hooks(self):
         conf = get_config(_CONF['hooks'])
@@ -171,10 +259,10 @@ class TestConfig(TestCase):
         watchers = conf['watchers']
         self.assertEqual(len(watchers), 3)
         watchers = conf['watchers']
-        if PY3:
-            watchers = sorted(watchers, key=lambda a: a['__name__'])
-        else:
+        if PY2:
             watchers.sort()
+        else:
+            watchers = sorted(watchers, key=lambda a: a['__name__'])
         self.assertEqual(watchers[2]['env']['INI'], 'private.ini')
         self.assertEqual(conf['check_delay'], 555)
 

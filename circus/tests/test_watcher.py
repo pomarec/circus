@@ -12,7 +12,6 @@ except ImportError:
 
 import tornado
 import mock
-from zmq.utils.strtypes import u
 
 from circus import logger
 from circus.process import RUNNING, UNEXISTING
@@ -23,6 +22,7 @@ from circus.tests.support import async_poll_for, EasyTestSuite
 from circus.tests.support import MagicMockFuture
 from circus.util import get_python_version, tornado_sleep
 from circus.watcher import Watcher
+from circus.py3compat import s
 
 warnings.filterwarnings('ignore',
                         module='threading', message='sys.exc_clear')
@@ -236,7 +236,7 @@ class TestWatcherInitialization(TestCircus):
                 messages.append(m)
             except Queue.Empty:
                 pass
-            data = ''.join(u(m['data']) for m in messages)
+            data = ''.join(s(m['data']) for m in messages)
             if 'XYZ' in data:
                 resp = True
                 break
@@ -360,7 +360,7 @@ class TestWatcherHooks(TestCircus):
         events = {'before_start_called': False}
 
         def hook(watcher, arbiter, hook_name, **kwargs):
-            events['before_start_called'] = True
+            events['%s_called' % hook_name] = True
             events['arbiter_in_hook'] = arbiter
 
             if hook_kwargs_test_function is not None:
@@ -391,7 +391,7 @@ class TestWatcherHooks(TestCircus):
             yield arbiter.stop()
             logger.exception = old
 
-        self.assertTrue(events['before_start_called'])
+        self.assertTrue(events['%s_called' % hook_name])
         self.assertEqual(events['arbiter_in_hook'], arbiter)
 
     @tornado.gen.coroutine
@@ -520,6 +520,22 @@ class TestWatcherHooks(TestCircus):
                                hook_name='before_spawn', call=self._stop)
 
     @tornado.testing.gen_test
+    def test_after_spawn(self):
+        yield self._test_hooks(hook_name='after_spawn')
+
+    @tornado.testing.gen_test
+    def test_after_spawn_failure(self):
+        with captured_output('stdout'):
+            yield self._test_hooks(behavior=ERROR, status='stopped',
+                                   hook_name='after_spawn',
+                                   call=self._stop)
+
+    @tornado.testing.gen_test
+    def test_after_spawn_false(self):
+        yield self._test_hooks(behavior=FAILURE, status='stopped',
+                               hook_name='after_spawn', call=self._stop)
+
+    @tornado.testing.gen_test
     def test_extended_stats(self):
         yield self._test_extended_stats()
         yield self._test_extended_stats(extended=True)
@@ -552,7 +568,7 @@ class RespawnTest(TestCircus):
 
             # If we explicitely ask the watcher to respawn its processes,
             # ensure it's doing so.
-            yield watcher.spawn_processes()
+            yield watcher.start()
             self.assertEqual(len(watcher.processes), 1)
         finally:
             yield arbiter.stop()

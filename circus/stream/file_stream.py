@@ -2,7 +2,7 @@ import os
 import tempfile
 from datetime import datetime
 from circus import logger
-from zmq.utils.strtypes import u
+from circus.py3compat import s, PY2
 
 
 class FileStream(object):
@@ -62,14 +62,20 @@ class FileStream(object):
             self._do_rollover()
 
         # If we want to prefix the stream with the current datetime
-        for line in u(data['data']).split('\n'):
+        for line in s(data['data']).split('\n'):
             if not line:
                 continue
             if self.time_format is not None:
                 self._file.write('{time} [{pid}] | '.format(
                     time=self.now().strftime(self.time_format),
                     pid=data['pid']))
-            self._file.write(line)
+            try:
+                self._file.write(line)
+            except Exception:
+                # we can strip the string down on Py3 but not on Py2
+                if not PY2:
+                    self._file.write(line.encode('latin-1', errors='replace').
+                                     decode('latin-1'))
             self._file.write('\n')
         self._file.flush()
 

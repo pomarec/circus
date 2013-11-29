@@ -14,6 +14,7 @@ Example:
     endpoint = tcp://127.0.0.1:5555
     pubsub_endpoint = tcp://127.0.0.1:5556
     include = \*.more.config.ini
+    umask = 002
 
     [watcher:myprogram]
     cmd = python
@@ -94,6 +95,8 @@ circus - single section
         stdout/stderr (default: False)
     **pidfile**
         The file that must be used to keep the daemon pid.
+    **umask**
+        Value for umask. If not set, circusd will not attempt to modify umask.
     **loglevel**
         The loglevel that we want to see (default: INFO)
     **logoutput**
@@ -114,6 +117,9 @@ watcher:NAME - as many sections as you want
         :ref:`formatting_cmd` for more information on this.
     **shell**
         If True, the processes are run in the shell (default: False)
+    **shell_args**
+        Command-line arguments to pass to the shell command when **shell** is
+        True. Works only for *nix system (default: None)
     **working_dir**
         The working dir for the processes (default: None)
     **uid**
@@ -216,6 +222,8 @@ watcher:NAME - as many sections as you want
         If the worker is still active after graceful_timeout seconds, we send
         it a SIGKILL signal.  It is not possible to catch SIGKILL signals so
         the worker will stop.
+        
+        Defaults to 30s.
 
     **priority**
         Integer that defines a priority for the watcher. When the
@@ -249,15 +257,17 @@ watcher:NAME - as many sections as you want
         is needed, it will be only triggered at the next socket event.
 
     **hooks.***
-        Available hooks: **before_start**, **before_spawn**, **after_start**,
-        **before_stop**, **after_stop**, **before_signal**, **after_signal**,
+        Available hooks: **before_start**, **after_start**,
+        **before_spawn**, **after_spawn**,
+        **before_stop**, **after_stop**,
+        **before_signal**, **after_signal**,
         **extended_stats**
 
         Define callback functions that hook into the watcher startup/shutdown process.
 
         If the hook returns **False** and if the hook is one of
-        **before_start**, **before_spawn** or  **after_start**, the startup
-        will be aborted.
+        **before_start**, **before_spawn**, **after_start** or **after_spawn**,
+        the startup will be aborted.
 
         If the hook is **before_signal** and returns **False**, then the
         corresponding signal will not be sent (except SIGKILL which is always
@@ -281,7 +291,8 @@ watcher:NAME - as many sections as you want
 
     **respawn**
         If set to False, the processes handled by a watcher will not be
-        respawned automatically. (default: True)
+        respawned automatically. The processes can be manually respawned with
+        the `start` command. (default: True)
 
 
 
@@ -313,6 +324,10 @@ socket:NAME - as many sections as you want
         When provided, sets the umask that will be used to create an
         AF_UNIX socket. For example, `umask=000` will produce a socket with
         permission `777`.
+    **replace**
+        When creating Unix sockets ('AF_UNIX'), an existing file may indicate a
+        problem so the default is to fail. Specify `True` to simply remove the
+        old file if you are sure that the socket is managed only by Circus.
     **so_reuseport**
         If set to True and SO_REUSEPORT is available on target platform, circus
         will create and bind new SO_REUSEPORT socket(s) for every worker it starts

@@ -80,7 +80,7 @@ class Arbiter(object):
                  httpd_host='localhost', httpd_port=8080,
                  httpd_close_outputs=False, debug=False,
                  ssh_server=None, proc_name='circusd', pidfile=None,
-                 loglevel=None, logoutput=None, fqdn_prefix=None):
+                 loglevel=None, logoutput=None, fqdn_prefix=None, umask=None):
 
         self.watchers = watchers
         self.endpoint = endpoint
@@ -94,6 +94,7 @@ class Arbiter(object):
         self.pidfile = pidfile
         self.loglevel = loglevel
         self.logoutput = logoutput
+        self.umask = umask
 
         try:
             # getfqdn appears to fail in Python3.3 in the unittest
@@ -421,7 +422,8 @@ class Arbiter(object):
                       pidfile=cfg.get('pidfile', None),
                       loglevel=cfg.get('loglevel', None),
                       logoutput=cfg.get('logoutput', None),
-                      fqdn_prefix=cfg.get('fqdn_prefix', None))
+                      fqdn_prefix=cfg.get('fqdn_prefix', None),
+                      umask=cfg['umask'])
 
         # store the cfg which will be used, so it can be used later
         # for checking if the cfg has been changed
@@ -437,6 +439,10 @@ class Arbiter(object):
     def initialize(self):
         # set process title
         _setproctitle(self.proc_name)
+
+        # set umask even though we may have already set it early in circusd.py
+        if self.umask is not None:
+            os.umask(self.umask)
 
         # event pub socket
         self.evpub_socket = self.context.socket(zmq.PUB)
@@ -536,7 +542,7 @@ class Arbiter(object):
     def _stop(self):
         logger.info('Arbiter exiting')
         self._stopping = True
-        yield self._stop_watchers()
+        yield self._stop_watchers(close_output_streams=True)
         if self._provided_loop:
             cb = self.stop_controller_and_close_sockets
             self.loop.add_callback(cb)
@@ -586,10 +592,13 @@ class Arbiter(object):
         need_on_demand = False
         # manage and reap processes
         self.reap_processes()
+        list_to_yield = []
         for watcher in self.iter_watchers():
             if watcher.on_demand and watcher.is_stopped():
                 need_on_demand = True
-            yield watcher.manage_processes()
+            list_to_yield.append(watcher.manage_processes())
+        if len(list_to_yield) > 0:
+            yield list_to_yield
 
         if need_on_demand:
             sockets = [x.fileno() for x in self.sockets.values()]
@@ -697,8 +706,9 @@ class Arbiter(object):
 
     @gen.coroutine
     @debuglog
-    def _stop_watchers(self):
-        yield [w._stop() for w in self.iter_watchers(reverse=False)]
+    def _stop_watchers(self, close_output_streams=False):
+        yield [w._stop(close_output_streams)
+               for w in self.iter_watchers(reverse=False)]
 
     @synchronized("arbiter_stop_watchers")
     @gen.coroutine

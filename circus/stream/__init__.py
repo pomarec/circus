@@ -10,7 +10,7 @@ except ImportError:
 from circus.util import resolve_name
 from circus.stream.file_stream import FileStream
 from circus.stream.redirector import Redirector
-from zmq.utils.strtypes import u
+from circus.py3compat import s
 
 
 class QueueStream(Queue):
@@ -30,7 +30,7 @@ class StdoutStream(object):
         pass
 
     def __call__(self, data):
-        sys.stdout.write(u(data['data']))
+        sys.stdout.write(s(data['data']))
         sys.stdout.flush()
 
     def close(self):
@@ -77,13 +77,11 @@ class FancyStdoutStream(StdoutStream):
     # Generate a datetime object
     now = datetime.now
 
-    def __init__(self, color=None, time_format=None, *args, **kwargs):
+    def __init__(self, color=None, time_format=None, **kwargs):
+        super(FancyStdoutStream, self).__init__(**kwargs)
         self.time_format = time_format or '%Y-%m-%d %H:%M:%S'
-
-        # If no color is provided we pick one at random
         if color not in self.colors:
             color = random.choice(self.colors)
-
         self.color_code = self.colors.index(color) + 1
 
     def prefix(self, pid):
@@ -105,7 +103,7 @@ class FancyStdoutStream(StdoutStream):
         return color + prefix
 
     def __call__(self, data):
-        for line in u(data['data']).split('\n'):
+        for line in s(data['data']).split('\n'):
             if line:
                 self.out.write(self.prefix(data['pid']))
                 self.out.write(line)
@@ -114,20 +112,22 @@ class FancyStdoutStream(StdoutStream):
                 self.out.flush()
 
 
-def get_stream(conf):
+def get_stream(conf, reload=False):
     if not conf:
         return conf
 
     # we can have 'stream' or 'class' or 'filename'
-    if 'filename' in conf:
-        inst = FileStream(**conf)
-    elif 'stream' in conf:
-        inst = conf['stream']
-    elif 'class' in conf:
+    if 'class' in conf:
         class_name = conf.pop('class')
         if not "." in class_name:
-            class_name = "circus.stream.%s" % class_name
-        inst = resolve_name(class_name)(**conf)
+            cls = globals()[class_name]
+            inst = cls(**conf)
+        else:
+            inst = resolve_name(class_name, reload=reload)(**conf)
+    elif 'stream' in conf:
+        inst = conf['stream']
+    elif 'filename' in conf:
+        inst = FileStream(**conf)
     else:
         raise ValueError("stream configuration invalid")
 

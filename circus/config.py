@@ -157,6 +157,9 @@ def get_config(config_file):
                                         DEFAULT_ENDPOINT_MULTICAST)
     config['stats_endpoint'] = dget('circus', 'stats_endpoint', None)
     config['statsd'] = dget('circus', 'statsd', False, bool)
+    config['umask'] = dget('circus', 'umask', None)
+    if config['umask']:
+        config['umask'] = int(config['umask'], 8)
 
     if config['stats_endpoint'] is None:
         config['stats_endpoint'] = DEFAULT_ENDPOINT_STATS
@@ -186,11 +189,14 @@ def get_config(config_file):
             sock = dict(cfg.items(section))
             sock['name'] = section.split("socket:")[-1].lower()
             sock['so_reuseport'] = dget(section, "so_reuseport", False, bool)
+            sock['replace'] = dget(section, "replace", False, bool)
             sockets.append(sock)
 
         if section.startswith("plugin:"):
             plugin = dict(cfg.items(section))
             plugin['name'] = section
+            if 'priority' in plugin:
+                plugin['priority'] = int(plugin['priority'])
             plugins.append(plugin)
 
         if section.startswith("watcher:"):
