@@ -192,7 +192,7 @@ class WatcherMonitor(Monitor):
             logger.info("Sending %s to watcher %s",
                         self.rw.action, self.rw.watcher)
             self.rw.statsd.increment("_resource_watcher.%s.%sing" %
-                                     self.rw.watcher, self.rw.action)
+                                     (self.rw.watcher, self.rw.action))
             self.rw.cast(self.rw.action, name=self.rw.watcher)
         else:
             # Signale effective on processes, not on the watcher
