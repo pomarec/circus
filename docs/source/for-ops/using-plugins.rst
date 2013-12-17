@@ -130,13 +130,14 @@ ResourceWatcher
     **max_count**
         How often these limits (each one is counted separately) are allowed to be exceeded before a restart will be triggered. Default: 3
 
-    **use_reload**
-        Trigger a reload command instead of restart. Default: False
+    **action**
+        Which action to trigger when max_count is hit. Values are reload, restart and all process signals.
 
     **per_process**
-        Resource usage will be monitored on a per process basis. Default: True.
-        Example : if per_process is True and max_cpu is set, the restart (or reload) command will be triggered when a process exceeds this limit (taken into account loop_rate and max_count).
+        Resource usage will be monitored on a per process basis. Default: False.
+        Example : if per_process is True and max_cpu is set, action will be triggered when a process exceeds this limit (taken into account loop_rate and max_count).
         If per_process is false, it will be triggered if the sum of cpu consumed by watcher's process exceeds max_cpu.
+        Becareful, if per_process is true only reload and restart actions are valid. If it is false, only signals actions are valid.
 
 
 
