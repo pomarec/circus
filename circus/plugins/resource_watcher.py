@@ -153,10 +153,13 @@ class Monitor(object):
         limit_type = metric[:3]
         if (limit_type == 'max' and value > threshold or
                 limit_type == 'min' and value < threshold):
+            statdsMsg0 = "under" if limit_type == 'min' else "over"
+            metricType = metric.split('_')[1]
+            statdsMsg1 = "memory" if metricType == 'mem' else metricType
             self.rw.statsd.increment("_resource_watcher.%s.%s_%s" %
                                      (self.rw.watcher,
-                                      {'min': "under"}.get(limit_type, "over"),
-                                      metric.split('_')[1]))
+                                      statdsMsg0,
+                                      statdsMsg1))
             self._counters[metric] += 1
         else:
             self._counters[metric] = 0
