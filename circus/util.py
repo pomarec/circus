@@ -1,8 +1,5 @@
-import fcntl
-import grp
 import logging
 import os
-import pwd
 import re
 import shlex
 import socket
@@ -10,6 +7,14 @@ import sys
 import time
 import functools
 import traceback
+try:
+    import pwd
+    import grp
+    import fcntl
+except ImportError:
+    fcntl = None
+    grp = None
+    pwd = None
 from tornado.ioloop import IOLoop
 from tornado import gen
 from tornado import concurrent
@@ -18,12 +23,10 @@ try:
     from configparser import (
         ConfigParser, MissingSectionHeaderError, ParsingError, DEFAULTSECT
     )
-    new_config_parser = True
 except ImportError:
     from ConfigParser import (  # NOQA
         ConfigParser, MissingSectionHeaderError, ParsingError, DEFAULTSECT
     )
-    new_config_parser = False
 
 from datetime import timedelta
 from functools import wraps
@@ -233,14 +236,17 @@ def get_info(process=None, interval=0, with_childs=False):
 
     return info
 
+TRUTHY_STRINGS = ('yes', 'true', 'on', '1')
+FALSY_STRINGS = ('no', 'false', 'off', '0')
+
 
 def to_bool(s):
     if isinstance(s, bool):
         return s
 
-    if s.lower().strip() in ("true", "1",):
+    if s.lower().strip() in TRUTHY_STRINGS:
         return True
-    elif s.lower().strip() in ("false", "0"):
+    elif s.lower().strip() in FALSY_STRINGS:
         return False
     else:
         raise ValueError("%r is not a boolean" % s)
@@ -264,63 +270,77 @@ def to_signum(signum):
         raise ValueError('signal invalid')
 
 
-def to_uid(name):
-    """Return an uid, given a user name.
-    If the name is an integer, make sure it's an existing uid.
+if pwd is None:
 
-    If the user name is unknown, raises a ValueError.
-    """
-    try:
-        name = int(name)
-    except ValueError:
-        pass
+    def to_uid(name):
+        raise RuntimeError("'to_uid' not available on this operating system")
 
-    if isinstance(name, int):
+else:
+
+    def to_uid(name):  # NOQA
+        """Return an uid, given a user name.
+        If the name is an integer, make sure it's an existing uid.
+
+        If the user name is unknown, raises a ValueError.
+        """
         try:
-            pwd.getpwuid(name)
-            return name
+            name = int(name)
+        except ValueError:
+            pass
+
+        if isinstance(name, int):
+            try:
+                pwd.getpwuid(name)
+                return name
+            except KeyError:
+                raise ValueError("%r isn't a valid user id" % name)
+
+        from circus.py3compat import string_types  # circular import fix
+
+        if not isinstance(name, string_types):
+            raise TypeError(name)
+
+        try:
+            return pwd.getpwnam(name).pw_uid
         except KeyError:
-            raise ValueError("%r isn't a valid user id" % name)
+            raise ValueError("%r isn't a valid user name" % name)
 
-    from circus.py3compat import string_types  # circular import fix
+if grp is None:
 
-    if not isinstance(name, string_types):
-        raise TypeError(name)
+    def to_gid(name):
+        raise RuntimeError("'to_gid' not available on this operating system")
 
-    try:
-        return pwd.getpwnam(name).pw_uid
-    except KeyError:
-        raise ValueError("%r isn't a valid user name" % name)
+else:
 
+    def to_gid(name):  # NOQA
+        """Return a gid, given a group name
 
-def to_gid(name):
-    """Return a gid, given a group name
-
-    If the group name is unknown, raises a ValueError.
-    """
-    try:
-        name = int(name)
-    except ValueError:
-        pass
-
-    if isinstance(name, int):
+        If the group name is unknown, raises a ValueError.
+        """
         try:
-            grp.getgrgid(name)
-            return name
-        # getgrid may raises overflow error on mac/os x, fixed in python2.7.5
-        # see http://bugs.python.org/issue17531
-        except (KeyError, OverflowError):
+            name = int(name)
+        except ValueError:
+            pass
+
+        if isinstance(name, int):
+            try:
+                grp.getgrgid(name)
+                return name
+            # getgrid may raises overflow error on mac/os x,
+            # fixed in python2.7.5
+            # see http://bugs.python.org/issue17531
+            except (KeyError, OverflowError):
+                raise ValueError("No such group: %r" % name)
+
+        from circus.py3compat import string_types  # circular import fix
+
+        if not isinstance(name, string_types):
+            raise TypeError(name)
+
+        try:
+            return grp.getgrnam(name).gr_gid
+        except KeyError:
             raise ValueError("No such group: %r" % name)
-
-    from circus.py3compat import string_types  # circular import fix
-
-    if not isinstance(name, string_types):
-        raise TypeError(name)
-
-    try:
-        return grp.getgrnam(name).gr_gid
-    except KeyError:
-        raise ValueError("No such group: %r" % name)
 
 
 def parse_env_str(env_str):
@@ -350,10 +370,18 @@ def env_to_str(env):
                      sorted(env.items(), key=lambda i: i[0])])
 
 
-def close_on_exec(fd):
-    flags = fcntl.fcntl(fd, fcntl.F_GETFD)
-    flags |= fcntl.FD_CLOEXEC
-    fcntl.fcntl(fd, fcntl.F_SETFD, flags)
+if fcntl is None:
+
+    def close_on_exec(fd):
+        raise RuntimeError(
+            "'close_on_exec' not available on this operating system")
+
+else:
+
+    def close_on_exec(fd):  # NOQA
+        flags = fcntl.fcntl(fd, fcntl.F_GETFD)
+        flags |= fcntl.FD_CLOEXEC
+        fcntl.fcntl(fd, fcntl.F_SETFD, flags)
 
 
 def get_python_version():
@@ -580,17 +608,6 @@ def configure_logger(logger, level='INFO', output="-"):
 
 
 class StrictConfigParser(ConfigParser):
-
-    if new_config_parser:
-        def toboolean(self, value):
-            if value.lower() not in self.BOOLEAN_STATES:
-                raise ValueError('Not a boolean: %s' % value)
-            return self.BOOLEAN_STATES[value.lower()]
-    else:
-        def toboolean(self, value):  # NOQA
-            if value.lower() not in self._boolean_states:
-                raise ValueError('Not a boolean: %s' % value)
-            return self._boolean_states[value.lower()]
 
     def _read(self, fp, fpname):
         cursect = None                        # None, or a dictionary
