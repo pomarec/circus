@@ -9,7 +9,7 @@ Statsd
 ======
 
     **use**
-         set to ``circus.plugins.statsd.StatsdEmitter``
+        set to 'circus.plugins.statsd.StatsdEmitter'
 
     **application_name**
         the name used to identify the bucket prefix to emit the stats to (it will be prefixed with ``circus.`` and suffixed with ``.watcher``)
@@ -93,7 +93,7 @@ HttpObserver
 ResourceWatcher
 ===============
 
-    This services watches the resources of the given process and triggers a restart when they exceed certain limitations too often in a row.
+    This services watches the resources of the given process and triggers a restart or reload when they exceed certain limitations too often in a row.
 
     It has the same configuration as statsd and adds the following:
 
@@ -111,21 +111,33 @@ ResourceWatcher
         The maximum cpu one process is allowed to consume (in %). Default: 90
 
     **min_cpu**
-	   The minimum cpu one process should consume (in %). Default: None (no minimum)
-	   You can set the min_cpu to 0 (zero), in this case if one process consume exactly 0% cpu, it will trigger an exceeded limit.
+        The minimum cpu one process should consume (in %). Default: None (no minimum)
+        You can set the min_cpu to 0 (zero), in this case if one process consume exactly 0% cpu, it will trigger an exceeded limit.
 
     **max_mem**
-        The amount of memory one process of this watcher is allowed to consume (in %). Default: 90
+        The amount of memory one process of this watcher is allowed to consume. Default: 90.
+        If no unit is specified, the value is in %. Example: 50
+        If a unit is specified, the value is in bytes. Supported units are B, K, M, G, T, P, E, Z, Y. Example: 250M
 
     **min_mem**
-	   The minimum memory one process should consume (in %). Default: None (no minimum)
-	   You can set the min_mem to 0 (zero), in this case if one process consume exactly 0% memory, it will trigger an exceeded limit.
+        The minimum memory one process of this watcher should consume. Default: None (no minimum).
+        If no unit is specified, the value is in %. Example: 50
+        If a unit is specified, the value is in bytes. Supported units are B, K, M, G, T, P, E, Z, Y. Example: 250M
 
     **health_threshold**
         The health is the average of cpu and memory (in %) the watchers processes are allowed to consume (in %). Default: 75
 
     **max_count**
         How often these limits (each one is counted separately) are allowed to be exceeded before a restart will be triggered. Default: 3
+
+    **action**
+        Which action to trigger when max_count is hit. Values are reload, restart and all process signals.
+
+    **per_process**
+        Resource usage will be monitored on a per process basis. Default: False.
+        Example : if per_process is True and max_cpu is set, action will be triggered when a process exceeds this limit (taken into account loop_rate and max_count).
+        If per_process is false, it will be triggered if the sum of cpu consumed by watcher's process exceeds max_cpu.
+        Becareful, if per_process is true only reload and restart actions are valid. If it is false, only signals actions are valid.
 
 
 
@@ -146,7 +158,6 @@ Example:
     max_cpu = 70
     min_mem = 0
     max_mem = 20
-
 
 Watchdog
 ========
