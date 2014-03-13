@@ -124,15 +124,12 @@ def get_config(config_file):
     config = {}
 
     # reading the global environ first
-    def _upper(items):
-        return [(key.upper(), value) for key, value in items]
-
-    global_env = dict(_upper(os.environ.items()))
+    global_env = dict(os.environ.items())
     local_env = dict()
 
     # update environments with [env] section
     if 'env' in cfg.sections():
-        local_env.update(dict(_upper(cfg.items('env'))))
+        local_env.update(dict(cfg.items('env')))
         global_env.update(local_env)
 
     # always set the cfg environment
@@ -141,6 +138,7 @@ def get_config(config_file):
     # main circus options
     config['check_delay'] = dget('circus', 'check_delay', 5., float)
     config['endpoint'] = dget('circus', 'endpoint', DEFAULT_ENDPOINT_DEALER)
+    config['endpoint_owner'] = dget('circus', 'endpoint_owner', None, str)
     config['pubsub_endpoint'] = dget('circus', 'pubsub_endpoint',
                                      DEFAULT_ENDPOINT_SUB)
     config['multicast_endpoint'] = dget('circus', 'multicast_endpoint',
@@ -164,6 +162,7 @@ def get_config(config_file):
     config['httpd_host'] = dget('circus', 'httpd_host', 'localhost', str)
     config['httpd_port'] = dget('circus', 'httpd_port', 8080, int)
     config['debug'] = dget('circus', 'debug', False, bool)
+    config['debug_gc'] = dget('circus', 'debug_gc', False, bool)
     config['pidfile'] = dget('circus', 'pidfile')
     config['loglevel'] = dget('circus', 'loglevel')
     config['logoutput'] = dget('circus', 'logoutput')
@@ -195,10 +194,8 @@ def get_config(config_file):
 
             # create watcher options
             for opt, val in cfg.items(section, noreplace=True):
-                if opt == 'cmd':
-                    watcher['cmd'] = val
-                elif opt == 'args':
-                    watcher['args'] = val
+                if opt in ('cmd', 'args', 'working_dir', 'uid', 'gid'):
+                    watcher[opt] = val
                 elif opt == 'numprocesses':
                     watcher['numprocesses'] = dget(section, 'numprocesses', 1,
                                                    int)
@@ -208,25 +205,13 @@ def get_config(config_file):
                 elif opt == 'executable':
                     watcher['executable'] = dget(section, 'executable', None,
                                                  str)
-                elif opt == 'working_dir':
-                    watcher['working_dir'] = val
-                elif opt == 'shell':
-                    watcher['shell'] = dget(section, 'shell', False, bool)
-                elif opt == 'uid':
-                    watcher['uid'] = val
-                elif opt == 'gid':
-                    watcher['gid'] = val
-                elif opt == 'send_hup':
-                    watcher['send_hup'] = dget(section, 'send_hup', False,
-                                               bool)
+                # default bool to False
+                elif opt in ('shell', 'send_hup', 'stop_children',
+                             'close_child_stderr', 'use_sockets', 'singleton',
+                             'copy_env', 'copy_path', 'close_child_stdout'):
+                    watcher[opt] = dget(section, opt, False, bool)
                 elif opt == 'stop_signal':
                     watcher['stop_signal'] = to_signum(val)
-                elif opt == 'stop_children':
-                    watcher['stop_children'] = dget(section, 'stop_children',
-                                                    False, bool)
-                elif opt == 'check_flapping':
-                    watcher['check_flapping'] = dget(section, 'check_flapping',
-                                                     True, bool)
                 elif opt == 'max_retry':
                     watcher['max_retry'] = dget(section, "max_retry", 5, int)
                 elif opt == 'graceful_timeout':
@@ -241,18 +226,6 @@ def get_config(config_file):
                     watcher['rlimits'][limit] = int(val)
                 elif opt == 'priority':
                     watcher['priority'] = dget(section, "priority", 0, int)
-                elif opt == 'use_sockets':
-                    watcher['use_sockets'] = dget(section, "use_sockets",
-                                                  False, bool)
-                elif opt == 'singleton':
-                    watcher['singleton'] = dget(section, "singleton", False,
-                                                bool)
-                elif opt == 'copy_env':
-                    watcher['copy_env'] = dget(section, "copy_env", False,
-                                               bool)
-                elif opt == 'copy_path':
-                    watcher['copy_path'] = dget(section, "copy_path", False,
-                                                bool)
                 elif opt.startswith('hooks.'):
                     hook_name = opt[len('hooks.'):]
                     val = [elmt.strip() for elmt in val.split(',', 1)]
@@ -262,21 +235,9 @@ def get_config(config_file):
                         val[1] = to_bool(val[1])
 
                     watcher['hooks'][hook_name] = val
-
-                elif opt == 'respawn':
-                    watcher['respawn'] = dget(section, "respawn", True, bool)
-
-                elif opt == 'autostart':
-                    watcher['autostart'] = dget(section, "autostart", True,
-                                                bool)
-                elif opt == 'close_child_stdout':
-                    watcher['close_child_stdout'] = dget(section,
-                                                         "close_child_stdout",
-                                                         False, bool)
-                elif opt == 'close_child_stderr':
-                    watcher['close_child_stderr'] = dget(section,
-                                                         "close_child_stderr",
-                                                         False, bool)
+                # default bool to True
+                elif opt in ('check_flapping', 'respawn', 'autostart'):
+                    watcher[opt] = dget(section, opt, True, bool)
                 else:
                     # freeform
                     watcher[opt] = val
@@ -317,7 +278,7 @@ def get_config(config_file):
         if section.startswith('env:'):
             section_elements = section.split("env:", 1)[1]
             watcher_patterns = [s.strip() for s in section_elements.split(',')]
-            env_items = dict(_upper(cfg.items(section, noreplace=True)))
+            env_items = dict(cfg.items(section, noreplace=True))
 
             for pattern in watcher_patterns:
                 match = [w for w in watchers if fnmatch(w['name'], pattern)]

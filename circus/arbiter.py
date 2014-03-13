@@ -1,6 +1,7 @@
 import errno
 import logging
 import os
+import gc
 from circus.fixed_threading import Thread, get_ident
 import sys
 from time import sleep
@@ -67,9 +68,13 @@ class Arbiter(object):
       to /dev/null. (default: False)
     - **debug** -- if True, adds a lot of debug info in the stdout (default:
       False)
+    - **debug_gc** -- if True, does gc.set_debug(gc.DEBUG_LEAK) (default:
+      False)
+      to circusd to analyze problems (default: False)
     - **proc_name** -- the arbiter process name
     - **fqdn_prefix** -- a prefix for the unique identifier of the circus
                          instance on the cluster.
+    - **endpoint_owner** -- unix user to chown the endpoint to if using ipc.
     """
 
     def __init__(self, watchers, endpoint, pubsub_endpoint, check_delay=1.0,
@@ -78,9 +83,10 @@ class Arbiter(object):
                  multicast_endpoint=None, plugins=None,
                  sockets=None, warmup_delay=0, httpd=False,
                  httpd_host='localhost', httpd_port=8080,
-                 httpd_close_outputs=False, debug=False,
+                 httpd_close_outputs=False, debug=False, debug_gc=False,
                  ssh_server=None, proc_name='circusd', pidfile=None,
-                 loglevel=None, logoutput=None, fqdn_prefix=None, umask=None):
+                 loglevel=None, logoutput=None, fqdn_prefix=None, umask=None,
+                 endpoint_owner=None):
 
         self.watchers = watchers
         self.endpoint = endpoint
@@ -95,6 +101,7 @@ class Arbiter(object):
         self.loglevel = loglevel
         self.logoutput = logoutput
         self.umask = umask
+        self.endpoint_owner = endpoint_owner
 
         try:
             # getfqdn appears to fail in Python3.3 in the unittest
@@ -127,6 +134,10 @@ class Arbiter(object):
             self.stdout_stream = self.stderr_stream = {'class': 'StdoutStream'}
         else:
             self.stdout_stream = self.stderr_stream = None
+
+        self.debug_gc = debug_gc
+        if debug_gc:
+            gc.set_debug(gc.DEBUG_LEAK)
 
         # initializing circusd-stats as a watcher when configured
         self.statsd = statsd
@@ -211,7 +222,8 @@ class Arbiter(object):
             ioloop.install()
             self.loop = ioloop.IOLoop.instance()
         self.ctrl = Controller(self.endpoint, self.multicast_endpoint,
-                               self.context, self.loop, self, self.check_delay)
+                               self.context, self.loop, self, self.check_delay,
+                               self.endpoint_owner)
 
     def get_socket(self, name):
         return self.sockets.get(name, None)
@@ -418,12 +430,14 @@ class Arbiter(object):
                       httpd_host=cfg.get('httpd_host', 'localhost'),
                       httpd_port=cfg.get('httpd_port', 8080),
                       debug=cfg.get('debug', False),
+                      debug_gc=cfg.get('debug_gc', False),
                       ssh_server=cfg.get('ssh_server', None),
                       pidfile=cfg.get('pidfile', None),
                       loglevel=cfg.get('loglevel', None),
                       logoutput=cfg.get('logoutput', None),
                       fqdn_prefix=cfg.get('fqdn_prefix', None),
-                      umask=cfg['umask'])
+                      umask=cfg['umask'],
+                      endpoint_owner=cfg.get('endpoint_owner', None))
 
         # store the cfg which will be used, so it can be used later
         # for checking if the cfg has been changed
@@ -611,7 +625,7 @@ class Arbiter(object):
     @synchronized("arbiter_reload")
     @gen.coroutine
     @debuglog
-    def reload(self, graceful=True):
+    def reload(self, graceful=True, sequential=False):
         """Reloads everything.
 
         Run the :func:`prereload_fn` callable if any, then gracefuly
@@ -632,7 +646,7 @@ class Arbiter(object):
 
         # gracefully reload watchers
         for watcher in self.iter_watchers():
-            yield watcher._reload(graceful=graceful)
+            yield watcher._reload(graceful=graceful, sequential=sequential)
             tornado_sleep(self.warmup_delay)
 
     def numprocesses(self):
@@ -728,6 +742,10 @@ class Arbiter(object):
     @gen.coroutine
     def restart(self, inside_circusd=False):
         yield self._restart(inside_circusd=inside_circusd)
+
+    @property
+    def endpoint_owner_mode(self):
+        return self.ctrl.endpoint_owner_mode  # just wrap the controller
 
 
 class ThreadedArbiter(Thread, Arbiter):

@@ -220,6 +220,11 @@ def main():
 
     parser.add_argument('--ssh', default=None, help='SSH Server')
 
+    parser.add_argument('--process-timeout',
+                        default=3,
+                        help='After this delay of inactivity, a process will \
+                         be removed')
+
     args = parser.parse_args()
 
     if args.version:
@@ -245,10 +250,11 @@ def main():
                     subtopic = 'all'
 
                 # Clean pids that have not been updated recently
-                validPid = lambda p: p.isdigit() and p in watchers[watcher]
-                for pid in filter(validPid, watchers[watcher]):
-                        if last_refresh_for_pid[pid] < time.time() - 3:
-                            del watchers[watcher][pid]
+                valid_pid = lambda p: p.isdigit() and p in watchers[watcher]
+                for pid in filter(valid_pid, watchers[watcher]):
+                    if (last_refresh_for_pid[pid] <
+                            time.time() - int(args.process_timeout)):
+                        del watchers[watcher][pid]
                 last_refresh_for_pid[subtopic] = time.time()
 
                 # adding it to the structure
