@@ -9,6 +9,14 @@ import pstats
 import shutil
 import functools
 import multiprocessing
+import traceback
+try:
+    import sysconfig
+    DEBUG = sysconfig.get_config_var('Py_DEBUG') == 1
+except ImportError:
+    # py2.6, we don't really care about that flage here
+    # since no one will run Python --with-pydebug in 2.6
+    DEBUG = 0
 
 try:
     from unittest import skip, skipIf, TestCase, TestSuite, findTestCases
@@ -82,10 +90,10 @@ _CMD = sys.executable
 class TestCircus(AsyncTestCase):
 
     arbiter_factory = get_arbiter
+    arbiters = []
 
     def setUp(self):
         super(TestCircus, self).setUp()
-        self.arbiters = []
         self.files = []
         self.dirs = []
         self.tmpfiles = []
@@ -104,6 +112,12 @@ class TestCircus(AsyncTestCase):
         self.cli.stop()
         for plugin in self.plugins:
             plugin.stop()
+
+        for arbiter in self.arbiters:
+            if arbiter.running:
+                arbiter.stop()
+
+        self.arbiters = []
         super(TestCircus, self).tearDown()
 
     def make_plugin(self, klass, endpoint=DEFAULT_ENDPOINT_DEALER,
@@ -125,13 +139,14 @@ class TestCircus(AsyncTestCase):
             debug=True, async=True, **kw)
         self.test_file = testfile
         self.arbiter = arbiter
+        self.arbiters.append(arbiter)
         yield self.arbiter.start()
 
     @tornado.gen.coroutine
     def stop_arbiter(self):
         for watcher in self.arbiter.iter_watchers():
             yield self.arbiter.rm_watcher(watcher.name)
-        yield self.arbiter.stop()
+        yield self.arbiter._emergency_stop()
 
     @tornado.gen.coroutine
     def status(self, cmd, **props):
@@ -168,6 +183,13 @@ class TestCircus(AsyncTestCase):
         return file
 
     @classmethod
+    def handle_callback_exception(cls, callback):
+        if os.environ.get('CATCH_ASYNC_ERRORS'):
+            exc_type, exc_value, tb = sys.exc_info()
+            traceback.print_tb(tb)
+            raise exc_value
+
+    @classmethod
     def _create_circus(cls, callable_path, plugins=None, stats=False,
                        async=False, arbiter_kw=None, **kw):
         resolve_name(callable_path)   # used to check the callable
@@ -199,6 +221,8 @@ class TestCircus(AsyncTestCase):
 
         arbiter = cls.arbiter_factory([worker], plugins=plugins, **arbiter_kw)
 
+        arbiter.loop.handle_callback_exception = cls.handle_callback_exception
+        cls.arbiters.append(arbiter)
         #arbiter.start()
         return testfile, arbiter
 
@@ -396,12 +420,14 @@ def run_plugin(klass, config, plugin_info_callback=None, duration=300):
     plugin.statsd = _statsd
 
     deadline = time() + (duration / 1000.)
-    plugin.loop.add_timeout(deadline, plugin.loop.stop)
+    plugin.loop.add_timeout(deadline, plugin.stop)
     plugin.start()
-    if plugin_info_callback:
-        plugin_info_callback(plugin)
+    try:
+        if plugin_info_callback:
+            plugin_info_callback(plugin)
+    finally:
+        plugin.stop()
 
-    plugin.stop()
     return _statsd
 
 
@@ -413,8 +439,10 @@ def async_run_plugin(klass, config, plugin_info_callback, duration=300):
         target=run_plugin,
         args=(klass, config, plugin_info_callback, duration))
     circusctl_process.start()
+
     while queue.empty():
         yield tornado_sleep(.1)
+
     result = queue.get()
     raise tornado.gen.Return(result)
 

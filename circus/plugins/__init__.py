@@ -1,7 +1,6 @@
 """ Base class to create Circus subscribers plugins.
 """
 import sys
-import logging
 import errno
 import uuid
 import argparse
@@ -13,8 +12,7 @@ from zmq.eventloop import ioloop, zmqstream
 from circus import logger, __version__
 from circus.client import make_message, cast_message
 from circus.py3compat import b, s
-from circus.util import (debuglog, to_bool, resolve_name, close_on_exec,
-                         LOG_LEVELS, LOG_FMT, LOG_DATE_FMT,
+from circus.util import (debuglog, to_bool, resolve_name, configure_logger,
                          DEFAULT_ENDPOINT_DEALER, DEFAULT_ENDPOINT_SUB,
                          get_connection)
 
@@ -65,6 +63,7 @@ class CircusPlugin(object):
         self.handle_init()
         self.initialize()
         self.running = True
+
         while True:
             try:
                 self.loop.start()
@@ -81,8 +80,11 @@ class CircusPlugin(object):
                     raise
             else:
                 break
+
+        self.substream.close()
         self.client.close()
         self.sub_socket.close()
+        self.context.destroy()
 
     @debuglog
     def stop(self):
@@ -175,7 +177,7 @@ def _str2cfg(data):
 
 
 def get_plugin_cmd(config, endpoint, pubsub, check_delay, ssh_server,
-                   debug=False):
+                   debug=False, loglevel=None, logoutput=None):
     fqn = config['use']
     # makes sure the name exists
     resolve_name(fqn)
@@ -192,6 +194,10 @@ def get_plugin_cmd(config, endpoint, pubsub, check_delay, ssh_server,
         cmd += ' --config %s' % config
     if debug:
         cmd += ' --log-level DEBUG'
+    elif loglevel:
+        cmd += ' --log-level ' + loglevel
+    if logoutput:
+        cmd += ' --log-output ' + logoutput
     cmd += ' %s' % fqn
     return cmd
 
@@ -238,25 +244,18 @@ def main():
         parser.print_usage()
         sys.exit(0)
 
+    factory = resolve_name(args.plugin)
+
     # configure the logger
-    loglevel = LOG_LEVELS.get(args.loglevel.lower(), logging.INFO)
-    logger.setLevel(loglevel)
-    if args.logoutput == "-":
-        h = logging.StreamHandler()
-    else:
-        h = logging.handlers.WatchedFileHandler(args.logoutput)
-        close_on_exec(h.stream.fileno())
-    fmt = logging.Formatter(LOG_FMT, LOG_DATE_FMT)
-    h.setFormatter(fmt)
-    logger.addHandler(h)
+    configure_logger(logger, args.loglevel, args.logoutput, name=factory.name)
 
     # load the plugin and run it.
     logger.info('Loading the plugin...')
     logger.info('Endpoint: %r' % args.endpoint)
     logger.info('Pub/sub: %r' % args.pubsub)
-    plugin = resolve_name(args.plugin)(args.endpoint, args.pubsub,
-                                       args.check_delay, args.ssh,
-                                       **_str2cfg(args.config))
+    plugin = factory(args.endpoint, args.pubsub,
+                     args.check_delay, args.ssh,
+                     **_str2cfg(args.config))
     logger.info('Starting')
     try:
         plugin.start()

@@ -28,6 +28,7 @@ class ResourceWatcher(BaseObserver):
                 self.watcher = self.service
         if self.watcher is None:
             self.statsd.stop()
+            self.loop.close()
             raise NotImplementedError('watcher is mandatory for now.')
 
         # Memory/CPU parameters
