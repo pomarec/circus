@@ -52,9 +52,9 @@ class CommandReloader(CircusPlugin):
         if os.path.isdir(path):
             max_mtime = 0
             for dirpath, dirnames, filenames in os.walk(path):
-                for dir in skip_dirs:
+                for d in skip_dirs:
                     try:
-                        dirnames.remove(dir)
+                        dirnames.remove(d)
                     except ValueError:
                         pass
                 for filename in filenames:
