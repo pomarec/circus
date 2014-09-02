@@ -275,3 +275,6 @@ CommandReloader
     **workers**
       A comma separated watcher names list indicating which workers should be
       checked. '*' or 'None' means that all workers will be checked.
+    **skip_dirs**
+      A comma separated directory names list indicating which folders should be
+      skipped. Default : no folder will be skipped.
