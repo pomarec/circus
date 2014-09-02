@@ -18,6 +18,7 @@ class CommandReloader(CircusPlugin):
         self.use_working_dir = bool(self.config.get('use_working_dir'))
         self.use_reload = bool(self.config.get('use_reload'))
         self.infos = defaultdict(dict)
+        self.skip_dirs = self.config.get('skip_dirs', '*')
 
     def is_modified(self, watcher, previous_path):
         if watcher not in self.infos:
@@ -28,19 +29,34 @@ class CommandReloader(CircusPlugin):
 
         # Get age of the watcher (max age of its processes)
         infos = self.call('stats')['infos'][watcher].values()
-        age = max(map(lambda x: x['age'], infos))
-        if math.ceil(time.time() - age + 5) < self.infos[watcher]['mtime']:
-            return True
-        
+        if infos:
+            age = max(map(lambda x: x['age'], infos))
+        else:
+            return False
+        if time.time() - age < self.infos[watcher]['mtime']:
+            if 'last_restart' not in self.infos[watcher]:
+                return True
+            else:
+                #verification for the case where processes didn't restarted yet,but reload command was already sent
+                return self.infos[watcher]['last_restart'] <  self.infos[watcher]['mtime']     
         return False
 
     def mtime_of_path(self, path):
         """ If path is a dir, returns the max modified time of all files in path
             (and subpaths recursively) else returns modified time of path.
         """
+        if self.skip_dirs != '*':
+            skip_dirs = [dir for dir in self.skip_dirs.split(',')]
+        else:
+            skip_dirs = []
         if os.path.isdir(path):
             max_mtime = 0
             for dirpath, dirnames, filenames in os.walk(path):
+                for dir in skip_dirs:
+                    try:
+                        dirnames.remove(dir)
+                    except ValueError:
+                        pass
                 for filename in filenames:
                     mtime = os.stat(os.path.join(dirpath, filename)).st_mtime
                     max_mtime = max(max_mtime, mtime)
@@ -95,3 +111,4 @@ class CommandReloader(CircusPlugin):
 
     def handle_recv(self, data):
         pass
+
