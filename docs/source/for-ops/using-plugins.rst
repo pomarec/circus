@@ -277,4 +277,4 @@ CommandReloader
       checked. '*' or 'None' means that all workers will be checked.
     **skip_dirs**
       A comma separated directory names list indicating which folders should be
-      skipped. 'None' means that no directory will be skipped. Default : 'None'
+      skipped. Default : no folders will be skipped.
