@@ -18,7 +18,7 @@ class CommandReloader(CircusPlugin):
         self.use_working_dir = bool(self.config.get('use_working_dir'))
         self.use_reload = bool(self.config.get('use_reload'))
         self.infos = defaultdict(dict)
-        self.skip_dirs = self.config.get('skip_dirs', 'None')
+        self.skip_dirs = self.config.get('skip_dirs')
 
     def is_modified(self, watcher, previous_path):
         if watcher not in self.infos:
@@ -45,7 +45,7 @@ class CommandReloader(CircusPlugin):
         """ If path is a dir, returns the max modified time of all files in path
             (and subpaths recursively) else returns modified time of path.
         """
-        if self.skip_dirs != 'None':
+        if self.skip_dirs is not None:
             skip_dirs = [dir for dir in self.skip_dirs.split(',')]
         else:
             skip_dirs = []
